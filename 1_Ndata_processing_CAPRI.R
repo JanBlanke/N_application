@@ -9,6 +9,7 @@ library(rgdal)
 library(gdata)
 library(rgdal)
 library(simecol)
+library(rgeos)
 eu.countries.mask <- readOGR("/home/jan/GIS_data", "EU_match_clue")
 
 ## Read NUTS2 shapefile
@@ -24,6 +25,12 @@ coordinates(grid) <- ~ V1 + V2
 proj4string(grid) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
 # delete two cells
 grid <- grid[-c(1183, 2171)]
+
+## Calculate nearest point matrix
+d <- gDistance(grid, spgeom2=NULL, byid=T)
+min.d <- apply(d, 1, function(x) order(x, decreasing=F)[2])
+dist.df <- cbind(as.data.frame(grid), as.data.frame(grid)[min.d,], apply(d, 1, function(x) sort(x, decreasing=F)[2]))
+colnames(dist.df) <- c(colnames(as.data.frame(grid)), 'n.lat', 'n.long', 'distance')
 
 ## Read nitrogen data from Julia
 setwd("/home/jan/Dropbox/Paper_2_nitro/Data/CAPRI")
@@ -61,13 +68,18 @@ for (i in 1990:2008){ # loop through historic years, fill wheat and maize lists
   over.wheat.capri <- over(grid, as(swheat.poly, "SpatialPolygons"))
   over.wheat.elliot <- over(grid, sp.nappl)[, 2]
     
+  ## NAs from gridlist not matching polygon
   na.idx <- as.vector(which(is.na(over.wheat.capri))) # rows from gridlist that are NA
   over.wheat.capri[na.idx] <- 1 # temporarily set to 1 since NA is not allowed
-  wheat.df <- cbind(as.data.frame(grid), swheat.poly[over.wheat.capri, ])
+  wheat.df <- cbind(as.data.frame(grid), swheat.poly[over.wheat.capri, ]) # return N values that correspond to each point!!!
   
-  for (k in na.idx) wheat.df[k, 3] <- modal(wheat.df[(k - 2):(k + 2), 3], na.rm=T)
+  for (k in na.idx) {
+    n.coords <- dist.df[k, 3:4]
+    wheat.df[k, 3] <- subset(wheat.df, V1 == n.coords[[1]] & V2 == n.coords[[2]])[3] #take value from nearest point
+  } 
+  
+  ## NAs N dataset
   na.idx.2 <- which(is.na(wheat.df[, 3])) # rows from df/gridlist which are now NA after returning CAPRI value
-  
   elliot.vals <- over.wheat.elliot[na.idx.2] * 10000
   elliot.vals[elliot.vals > 160] <- 100 # Set Sweden to 100 since the Elliot data for Sweden is unrealistic
   wheat.df[na.idx.2, 3] <- elliot.vals
@@ -90,7 +102,11 @@ for (i in 1990:2008){ # loop through historic years, fill wheat and maize lists
   over.maiz.capri[na.idx] <- 1 # temporarily set to 1 since NA is not allowed
   maiz.df <- cbind(as.data.frame(grid), maiz.poly[over.maiz.capri, ])
   
-  for (k in na.idx) maiz.df[k, 3] <- modal(maiz.df[(k - 2):(k + 2), 3], na.rm=T)    
+  for (k in na.idx) {
+    n.coords <- dist.df[k, 3:4]
+    maiz.df[k, 3] <- subset(maiz.df, V1 == n.coords[[1]] & V2 == n.coords[[2]])[3] #take value from nearest point
+  } 
+  
   na.idx.2 <- which(is.na(maiz.df[, 3])) # rows from df/gridlist which are now NA after returning CAPRI value
   
   maiz.df[na.idx.2, 3] <- over.maiz.elliot[na.idx.2] * 10000
@@ -183,7 +199,11 @@ for (i in unique(nappl$Year)){
   over.wheat.capri[na.idx] <- 1 # temporarily set to 1 since NA is not allowed
   wheat.df <- cbind(as.data.frame(grid), swheat.poly[over.wheat.capri, ])
   
-  for (k in na.idx) wheat.df[k, 3] <- modal(wheat.df[(k - 2):(k + 2), 3], na.rm=T)
+  #for (k in na.idx) wheat.df[k, 3] <- modal(wheat.df[(k - 2):(k + 2), 3], na.rm=T)
+  for (k in na.idx) {
+    n.coords <- dist.df[k, 3:4]
+    wheat.df[k, 3] <- subset(wheat.df, V1 == n.coords[[1]] & V2 == n.coords[[2]])[3] #take value from nearest point
+  }   
     
   na.idx.2 <- which(is.na(wheat.df[, 3])) # rows from df/gridlist which are now NA after returning CAPRI value
   elliot.vals <- over.wheat.elliot[na.idx.2] * 10000
@@ -205,7 +225,11 @@ for (i in unique(nappl$Year)){
   over.maiz.capri[na.idx] <- 1 # temporarily set to 1 since NA is not allowed
   maiz.df <- cbind(as.data.frame(grid), maiz.poly[over.maiz.capri, ])
   
-  for (k in na.idx) maiz.df[k, 3] <- modal(maiz.df[(k - 2):(k + 2), 3], na.rm=T)
+  #for (k in na.idx) maiz.df[k, 3] <- modal(maiz.df[(k - 2):(k + 2), 3], na.rm=T)
+  for (k in na.idx) {
+    n.coords <- dist.df[k, 3:4]
+    maiz.df[k, 3] <- subset(maiz.df, V1 == n.coords[[1]] & V2 == n.coords[[2]])[3] #take value from nearest point
+  }
   
   na.idx.2 <- which(is.na(maiz.df[, 3])) # rows from df/gridlist which are now NA after returning CAPRI value
   maiz.df[na.idx.2, 3] <- over.maiz.elliot[na.idx.2] * 10000
@@ -339,7 +363,7 @@ tail(all.interp)
 # TeCo  TeWWs	TeWWw	TeCoi	TeWWsi	TeWWwi
 n.all <- cbind(all.interp, all.interp[, c(4, 5, 4, 4)])
 colnames(n.all) <- c("lon", "lat", "year", "TeSW", "TeCo", "TeSWi", "TeCoi", "TeWW", "TeWWi")
-n.all[, 4:9] <- n.all[, 4:9]/10000
+n.all[, 4:9] <- n.all[, 4:9] / 10000
 
 #reorder for read-in
 n.all[, 1:2] <- n.all[, 1:2] - 0.25
